@@ -50,6 +50,20 @@ button.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);fon
 :root[data-theme="dark"] .lgh{filter:invert(1)}
 .empty{color:#5b6577;padding:14px 0}
 @media print{body{background:#fff}.panel.form{display:none}.wrap{display:block;padding:0}.paper{border:0;padding:0}}
+.stamp-img {
+  position: absolute;
+  top: 30px;       /* Geser ke atas/bawah agar menimpa teks */
+  left: 35px;      /* UBAH DI SINI: Nilai minus (misal: -10px s/d -30px) untuk geser KIRI, nilai positif (misal: 10px s/d 30px) untuk geser KANAN */
+  width: 90px;      /* Ukuran lebar stempel */
+  height: auto;
+  transform: rotate(-12deg); /* UBAH DI SINI: Derajat kemiringan (misal: -12deg untuk miring ke kiri, atau 12deg untuk miring ke kanan) */
+  opacity: 0.92;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  display: none;
+}
+ 
+
 </style>
 </head>
 <body>
@@ -76,10 +90,16 @@ button.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);fon
   <label>Pembayaran (rekening)</label><textarea id="rek" placeholder="Contoh: Transfer Bank ... no. ... a.n. ..."></textarea>
   <label>Pola pelunasan</label><select id="preset"><option value="a">DP 50%, lunas maksimal H-1</option><option value="b">DP 50%, lunas setelah acara selesai</option></select>
   <label>Syarat &amp; ketentuan</label><textarea id="syarat" style="min-height:110px"></textarea>
+  <div style="margin-top: 15px;">
+  <label style="display: block; font-weight: bold; margin-bottom: 5px;">Upload Stempel / Tanda Tangan:</label>
+  <input type="file" id="inputStempel" accept="image/*" onchange="uploadStempel(event)" style="width: 100%; padding: 5px;">
+  </div>
   <div class="row" style="margin-top:12px"><button id="print" class="pri">Cetak / simpan PDF</button><button id="reset">Kosongkan</button></div>
   <div id="dbbox" style="display:none"><button id="save" class="pri" style="width:100%;margin-top:8px">Simpan transaksi</button><p id="dbmsg" class="sub" style="margin-top:6px">Database: Google Sheets</p><h2>Ringkasan per bulan</h2><div id="sum"></div><h2>Riwayat tersimpan</h2><div id="hist"></div></div>
+  
 </div>
 <div class="paper" id="paper"></div>
+<div class="sign">
 </div>
 <script>
 var MASTER=[["BRG-001","LED Display 3x4m",2500000,"unit"],["BRG-002","Sound System 5000W",1500000,"set"],["BRG-003","Moving Head Beam 230W",300000,"unit"],["BRG-004","Stage Rigging 6x8m",3500000,"set"],["BRG-005","Genset 60 KVA",2000000,"unit"],["BRG-006","Wireless Microphone",150000,"unit"],["BRG-007","Intercom Wireless Hollyland",1750000,"set"],["BRG-008","Smart TV 55\" Hisense + Stand",850000,"unit"]];
@@ -268,7 +288,9 @@ function terbilang(n){return n>0?(tb(n)+" rupiah").replace(/\s+/g," ").trim():"n
 function renderKwt(){var amt=parseFloat($("paid").value)||0;
 $("paper").innerHTML='<div class="top"><div><img class="lgp" src="'+LOGO+'" alt="Digital Lombok"><small>Event Equipment Rental &amp; Production<br>Mataram, Nusa Tenggara Barat<br>Wa 081246466511, IG. @digitallombok</small></div><div style="text-align:right"><b>KWITANSI PEMBAYARAN</b><small>No. '+esc($("no").value)+'</small></div></div>'+
 '<table><tr><td style="width:170px">Telah terima dari</td><td><b>'+esc($("klien").value||"-")+'</b>'+($("inst").value?' ('+esc($("inst").value)+')':'')+'</td></tr><tr><td>Untuk pembayaran</td><td>Sewa peralatan dan jasa untuk acara '+esc($("acara").value||"-")+'</td></tr><tr><td>Jumlah uang</td><td><b>'+rp(amt)+'</b></td></tr><tr><td>Terbilang</td><td><i>'+terbilang(amt)+'</i></td></tr></table>'+
-'<p style="text-align:right;margin-top:36px">Mataram, '+fmtDate($("tgl").value)+'<br>Marketing Digital Lombok<br><br><br><br><br><b>SYARIP HIDAYATULLAH</b></p>'}
+'<div style="float:right; text-align:left; margin-top:6px; position:relative;">' +
+'<img id="stampImg" class="stamp-img" src="' + (currentStampDataURL || '') + '" style="display:' + (currentStampDataURL ? 'block' : 'none') + ';" />' +
+'<p style="text-align:right;margin-top:26px">Mataram, '+fmtDate($("tgl").value)+'<br>Marketing Digital Lombok<br><br><br><br><br><b>SYARIP HIDAYATULLAH</b></p>'}
 function fillPick(){var v=$("pick").value;$("pick").innerHTML=MASTER.map(function(m,i){return '<option value="'+i+'">'+esc(m[1])+' - '+rp(m[2])+'</option>'}).join("");if(v&&MASTER[v])$("pick").value=v}
 function drawM(){$("mlist").innerHTML=MASTER.map(function(m,i){return '<div class="m"><input data-m="'+i+'" data-k="1" value="'+esc(m[1])+'"><input type="number" min="0" data-m="'+i+'" data-k="2" value="'+m[2]+'"><button data-r="'+i+'" title="Hapus">x</button></div>'}).join("");
 document.querySelectorAll("#mlist input").forEach(function(el){el.oninput=function(){MASTER[el.dataset.m][el.dataset.k]=el.dataset.k==="2"?(parseFloat(el.value)||0):el.value;fillPick()}});
@@ -298,10 +320,31 @@ function renderQuo(){var J=$("jenis").value,paid=parseFloat($("paid").value)||0;
   '<div class="tot"><div><span>Subtotal</span><span>'+rp(sub)+'</span></div>'+(disc?'<div><span>Diskon</span><span>- '+rp(disc)+'</span></div>':'')+($("ppn").checked?'<div><span>PPN 11%</span><span>'+rp(tax)+'</span></div>':'')+
   '<div class="g"><span>Total</span><span>'+rp(total)+'</span></div>'+(J==="inv"?'<div><span>Sudah dibayar</span><span>- '+rp(paid)+'</span></div><div class="g"><span>Sisa tagihan</span><span>'+rp(total-paid)+'</span></div>':'<div><span>DP ('+($("dp").value||0)+'%)</span><span>'+rp(dp)+'</span></div>')+'</div>'+
   '<div class="terms"><b>Syarat &amp; ketentuan</b>\n'+esc($("syarat").value)+($("rek").value?'\n\n<b>Pembayaran</b>\n'+esc($("rek").value):'')+'</div>'+
-  '<p style="margin-top:36px">Hormat kami,<br>Marketing Digital Lombok<br><br><br><br><b>SYARIP HIDAYATULLAH</b></p>';
+  '<div style="float:left; text-align:left; margin-top:36px; position:relative;">' +
+  'Hormat kami,<br>Marketing Digital Lombok<br><br><br><br>' +
+  '<img id="stampImg" class="stamp-img" src="' + (currentStampDataURL || '') + '" style="display:' + (currentStampDataURL ? 'block' : 'none') + ';" />' +
+  '<br><b>SYARIP HIDAYATULLAH</b>' +
+'</div>'
 }
 var HIST=[],F=["no","tgl","klien","inst","acara","lokasi","tglacara","disc","dp","paid","rek","preset","syarat"];
+var currentStampDataURL = "";
 
+function uploadStempel(event) {
+  var file = event.target.files[0];
+  if (file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      currentStampDataURL = e.target.result;
+      var stampImg = document.getElementById('stampImg');
+      if (stampImg) {
+        stampImg.src = currentStampDataURL;
+        stampImg.style.width = '80px'; // Set ukuran lebar stempel di sini (misal: 80px atau 90px)
+        stampImg.style.display = 'block';
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+}
 $("madd").onclick=function(){
   var id="BRG-"+String(MASTER.length+1).padStart(3,"0");
   MASTER.push([id,"Barang baru",0,"unit"]); drawM(); fillPick();
