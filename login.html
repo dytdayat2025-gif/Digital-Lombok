@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Digital Lombok</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-card {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 32px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        }
+
+        .brand-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .brand-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-top: 8px;
+        }
+
+        .brand-subtitle {
+            font-size: 13px;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: #c9d1d9;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 14px;
+            background-color: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #f0f6fc;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .form-group input:focus {
+            border-color: #388bfd;
+            box-shadow: 0 0 0 3px rgba(56, 139, 253, 0.3);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 12px;
+            background-color: #238636;
+            color: #ffffff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            margin-top: 8px;
+        }
+
+        .btn-submit:hover {
+            background-color: #2ea043;
+        }
+
+        .error-message {
+            background-color: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.4);
+            color: #f85149;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+            text-align: center;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 12px;
+            color: #8b949e;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <div class="brand-header">
+            <h1 class="brand-title">Digital Lombok</h1>
+            <p class="brand-subtitle">Sistem Generator Penawaran & Invoice</p>
+        </div>
+
+        <div id="errorMessage" class="error-message">
+            Username atau password salah!
+        </div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Username / Email</label>
+                <input type="text" id="username" placeholder="Masukkan username" required autocomplete="username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Masukkan password" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="btn-submit">Masuk Sesi</button>
+        </form>
+
+        <div class="footer-note">
+            &copy; 2026 Digital Lombok. Event Equipment Rental & Production.
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorElement = document.getElementById('errorMessage');
+
+            // Kredensial sementara/sederhana (Ganti sesuai kebutuhan autentikasi Anda)
+            if (username === "admin" && password === "admin123") {
+                // Simpan status login sederhana di localStorage
+                localStorage.setItem("isLoggedIn", "true");
+                
+                // Arahkan ke halaman utama Generator Penawaran
+                window.location.href = "index.html"; 
+            } else {
+                errorElement.style.display = "block";
+            }
+        });
+    </script>
+
+</body>
+</html>
