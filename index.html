@@ -77,6 +77,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
 .nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);z-index:10}
 .nav button{border:0;background:none;border-radius:0;padding:8px 4px;font-size:11px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
 .nav button.on{color:var(--acc);font-weight:800}
+.nav button.logout{color:#b42318;font-weight:800}
 .bar{position:sticky;bottom:calc(56px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;background:var(--bg);padding:8px 0}
 #v-doc[data-p="form"] .prev,#v-doc[data-p="prev"] .form{display:none}
 .paper{padding:24px 20px;min-height:420px}
@@ -94,7 +95,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
 <body><header class="top">
   <img class="lgh" id="lgh" alt="Digital Lombok">
   <div class="ttl"><b>Digital Lombok</b><span id="dbmsg">Database: Google Sheets</span></div>
-  <nav class="nav" id="nav"><button data-v="doc" class="on">📝<span>Dokumen</span></button><button data-v="riwayat">🕘<span>Riwayat</span></button><button data-v="barang">📦<span>Barang</span></button><button data-v="rekap">📊<span>Rekap</span></button></nav>
+  <nav class="nav" id="nav"><button data-v="doc" class="on">📝<span>Dokumen</span></button><button data-v="riwayat">🕘<span>Riwayat</span></button><button data-v="barang">📦<span>Barang</span></button><button data-v="rekap">📊<span>Rekap</span></button><button data-action="logout" class="logout">⎋<span>Keluar</span></button></nav>
 </header>
 <main>
 <section class="view on" id="v-doc" data-p="form">
@@ -165,6 +166,13 @@ var $=function(i){return document.getElementById(i)};
 var rp=function(n){return "Rp "+Math.round(n).toLocaleString("id-ID")};
 var esc=function(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})};
 function fmtDate(v){if(!v)return "-";var d=new Date(v+"T00:00:00");return d.toLocaleDateString("id-ID",{day:"numeric",month:"long",year:"numeric"})}
+function logout(){
+  localStorage.removeItem("isLoggedIn");
+  window.location.href = "login.html";
+}
+if (localStorage.getItem("isLoggedIn") !== "true") {
+  window.location.replace("login.html");
+}
 // URL Web App Google Apps Script.
 // Setelah deploy Apps Script, tempel URL /exec di bawah.
 const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbw0ZZvZg_7_fVHY5Jr5Ouc62J5mV_ddojcvwg92cfbyuAYQai3EYd8Sx3t76BPRySoqUQ/exec";
@@ -613,7 +621,13 @@ function show(v){
   if(v==="barang")drawStok();
   if(v==="rekap")drawRekap();
 }
-document.querySelectorAll("#nav button").forEach(function(b){b.onclick=function(){show(b.dataset.v)}});
+document.querySelectorAll("#nav button").forEach(function(b){b.onclick=function(){
+  if (b.dataset.action === "logout") {
+    logout();
+    return;
+  }
+  show(b.dataset.v);
+}});
 document.querySelectorAll("#segd button").forEach(function(b){b.onclick=function(){
   $("v-doc").dataset.p=b.dataset.p;
   document.querySelectorAll("#segd button").forEach(function(x){x.classList.toggle("on",x===b)});window.scrollTo(0,0)}});

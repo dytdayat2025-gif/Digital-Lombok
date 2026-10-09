@@ -149,6 +149,10 @@
     </div>
 
     <script>
+        if (localStorage.getItem("isLoggedIn") === "true") {
+            window.location.href = "index.html";
+        }
+
         document.getElementById('loginForm').addEventListener('submit', function(event) {
             event.preventDefault();
 
@@ -156,13 +160,9 @@
             const password = document.getElementById('password').value;
             const errorElement = document.getElementById('errorMessage');
 
-            // Kredensial sementara/sederhana (Ganti sesuai kebutuhan autentikasi Anda)
             if (username === "admin" && password === "admin123") {
-                // Simpan status login sederhana di localStorage
                 localStorage.setItem("isLoggedIn", "true");
-                
-                // Arahkan ke halaman utama Generator Penawaran
-                window.location.href = "index.html"; 
+                window.location.href = "index.html";
             } else {
                 errorElement.style.display = "block";
             }
