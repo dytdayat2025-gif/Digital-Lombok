@@ -81,6 +81,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
 .bar{position:sticky;bottom:calc(56px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;background:var(--bg);padding:8px 0}
 #v-doc[data-p="form"] .prev,#v-doc[data-p="prev"] .form{display:none}
 .paper{padding:24px 20px;min-height:420px}
+@media(max-width:600px){.paper{padding:18px 12px}.paper table{font-size:11px}.paper th,.paper td{padding:6px 3px}.paper .r{white-space:normal}.paper .top{flex-direction:column}.paper .top>div:last-child{text-align:left!important}}
 @media(min-width:900px){
   .nav{position:static;display:flex;border:0;background:none;padding:0;margin-left:auto}
   .nav button{flex-direction:row;font-size:13px;padding:8px 14px;border-radius:10px}.nav button.on{background:var(--bg)}
@@ -123,6 +124,17 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
       <label>Rekening pembayaran</label><textarea id="rek" placeholder="Contoh: Transfer Bank ... no. ... a.n. ..."></textarea>
       <label>Pola pelunasan</label><select id="preset"><option value="a">DP 50%, lunas maksimal H-1</option><option value="b">DP 50%, lunas setelah acara selesai</option></select>
       <label>Syarat &amp; ketentuan</label><textarea id="syarat" style="min-height:110px"></textarea></div>
+    <div class="card"><h2>Stempel pengesahan</h2>
+      <p class="sub">Unggah logo stempel (PNG, sebaiknya latar transparan). Tersimpan di Google Sheets dan tampil di atas nama penandatangan.</p>
+      <div style="display:flex;gap:10px;align-items:center"><img id="stpv" alt="" style="height:64px;max-width:96px;object-fit:contain;display:none;border:1px dashed var(--line);border-radius:8px;padding:2px">
+      <div style="flex:1;display:grid;gap:6px"><button id="stbtn" class="pri">Pilih logo stempel (PNG)</button><button id="stdel" style="display:none">Hapus stempel</button></div></div>
+      <input id="stfile" type="file" accept="image/png" style="display:none">
+      <div class="row"><div><label>Ukuran</label><select id="stsize"><option value="80">Kecil</option><option value="110" selected>Sedang</option><option value="150">Besar</option></select></div><div style="align-self:end"><label class="chk"><input type="checkbox" id="stshow" checked> Tampilkan di dokumen</label></div></div>
+      <label>Posisi stempel <span id="stposl"></span></label>
+      <div class="row"><div><label>Geser kiri-kanan</label><input type="range" id="sx" min="-250" max="250"></div><div><label>Geser atas-bawah</label><input type="range" id="sy" min="-120" max="80"></div></div>
+      <button id="stres" style="width:100%;margin-top:8px">Reset posisi</button>
+      <p class="sub" style="margin-top:6px">Atau seret stempel langsung di pratinjau. Posisi Kwitansi diatur terpisah dari Penawaran/Invoice.</p>
+      <p id="stmsg" class="sub" style="margin-top:6px"></p></div>
     <div class="bar"><button id="save" class="pri">Simpan</button><button id="print">Cetak</button><button id="reset">Kosongkan</button></div>
   </div>
   <div class="prev"><div class="paper" id="paper"></div></div>
@@ -427,6 +439,8 @@ function queueSave(){
 /* Ambil kolom jenis & stok dari Master di Google Sheets (respons bootstrap yang sama dengan aplikasi) */
 function fetchExtras(){
   apiGet("bootstrap").then(function(r){
+    if(r.stamp&&r.stamp.img){STAMP.img=r.stamp.img;STAMP.size=Number(r.stamp.size)||110;if(r.stamp.pos&&r.stamp.pos.d&&r.stamp.pos.k)STAMP.pos=r.stamp.pos}else{STAMP.img=""}
+    stUI();render();
     if(pending)return;
     var ex={};(Array.isArray(r.master)?r.master:[]).forEach(function(o){ex[o.id]={k:o.k||"",s:o.s==null?"":o.s}});
     EX=ex;drawStok();
@@ -635,6 +649,69 @@ document.querySelectorAll("#segb button").forEach(function(b){b.onclick=function
   $("bs").style.display=b.dataset.b==="s"?"":"none";$("bh").style.display=b.dataset.b==="h"?"":"none";
   document.querySelectorAll("#segb button").forEach(function(x){x.classList.toggle("on",x===b)})}});
 $("hist").addEventListener("click",function(e){if(e.target.closest&&e.target.closest("a[data-o]"))show("doc")});
+/* ---------- Stempel pengesahan ---------- */
+var STAMP={img:"",size:110,pos:{d:{x:100,y:-35},k:{x:-100,y:-35}}};
+function curK(){return $("jenis").value==="kwt"?"k":"d"}
+function stmsg(t,c){var m=$("stmsg");m.textContent=t;m.style.color=c||""}
+function stUI(){
+  var has=!!STAMP.img;$("stpv").style.display=has?"":"none";if(has)$("stpv").src=STAMP.img;
+  $("stdel").style.display=has?"":"none";$("stbtn").textContent=has?"Ganti logo stempel (PNG)":"Pilih logo stempel (PNG)";
+  $("stsize").value=String(STAMP.size);
+  var ps=STAMP.pos[curK()];$("sx").value=ps.x;$("sy").value=ps.y;
+  $("stposl").textContent=curK()==="k"?"(Kwitansi)":"(Penawaran / Invoice)";
+}
+function applyStamp(){
+  if(!STAMP.img||!$("stshow").checked)return;
+  var ps=$("paper").querySelectorAll("p"),p=null;
+  for(var i=0;i<ps.length;i++)if(ps[i].textContent.indexOf("SYARIP HIDAYATULLAH")>-1)p=ps[i];
+  if(!p)return;
+  var nm=null,bs=p.querySelectorAll("b");for(var j=0;j<bs.length;j++)if(bs[j].textContent.indexOf("SYARIP")>-1)nm=bs[j];
+  if(!nm)return;
+  p.style.position="relative";
+  var pos=STAMP.pos[curK()],bx=nm.offsetLeft+nm.offsetWidth/2,by=nm.offsetTop+nm.offsetHeight/2,ox=pos.x,oy=pos.y;
+  var im=document.createElement("img");im.src=STAMP.img;im.draggable=false;
+  im.style.cssText="position:absolute;left:"+(bx+pos.x)+"px;top:"+(by+pos.y)+"px;transform:translate(-50%,-50%);width:"+STAMP.size+"px;opacity:.9;mix-blend-mode:multiply;cursor:move;touch-action:none;user-select:none";
+  im.onpointerdown=function(e){
+    e.preventDefault();var sx=e.clientX,sy=e.clientY;im.setPointerCapture(e.pointerId);
+    im.onpointermove=function(ev){
+      pos.x=Math.round(ox+ev.clientX-sx);pos.y=Math.round(oy+ev.clientY-sy);
+      im.style.left=(bx+pos.x)+"px";im.style.top=(by+pos.y)+"px";
+    };
+    im.onpointerup=function(){im.onpointermove=null;im.onpointerup=null;stUI();saveStamp()};
+  };
+  p.appendChild(im);
+}
+function saveStamp(){
+  stmsg("Menyimpan stempel ke Google Sheets...");
+  apiPost({action:"saveStamp",data:{img:STAMP.img,size:STAMP.size,pos:STAMP.pos}}).then(function(){stmsg(STAMP.img?"Stempel tersimpan di Google Sheets.":"Stempel dihapus.","green")})
+  .catch(function(e){stmsg("Gagal menyimpan stempel: "+e.message,"#b00020")});
+}
+$("stbtn").onclick=function(){$("stfile").click()};
+$("stfile").onchange=function(){
+  var f=this.files[0];this.value="";if(!f)return;
+  if(!/png/i.test(f.type)){stmsg("File harus berformat PNG.","#b00020");return}
+  var rd=new FileReader();
+  rd.onload=function(){var im=new Image();im.onload=function(){
+    var d="",sizes=[320,240,180,120];
+    for(var i=0;i<sizes.length;i++){
+      var sc=Math.min(1,sizes[i]/Math.max(im.width,im.height)),c=document.createElement("canvas");
+      c.width=Math.max(1,Math.round(im.width*sc));c.height=Math.max(1,Math.round(im.height*sc));
+      c.getContext("2d").drawImage(im,0,0,c.width,c.height);d=c.toDataURL("image/png");
+      if(d.length<=150000)break;
+    }
+    if(d.length>150000){stmsg("Gambar terlalu rumit/besar. Gunakan PNG yang lebih sederhana.","#b00020");return}
+    STAMP.img=d;stUI();render();saveStamp();
+  };im.onerror=function(){stmsg("Gambar tidak dapat dibaca.","#b00020")};im.src=rd.result};
+  rd.readAsDataURL(f);
+};
+$("stdel").onclick=function(){STAMP.img="";stUI();render();saveStamp()};
+$("stsize").onchange=function(){STAMP.size=Number($("stsize").value)||110;render();if(STAMP.img)saveStamp()};
+$("stshow").onchange=function(){render()};
+function stPos(){var q=STAMP.pos[curK()];q.x=Number($("sx").value)||0;q.y=Number($("sy").value)||0;render()}
+$("sx").oninput=stPos;$("sy").oninput=stPos;
+$("sx").onchange=$("sy").onchange=function(){if(STAMP.img)saveStamp()};
+$("stres").onclick=function(){STAMP.pos[curK()]=curK()==="k"?{x:-100,y:-35}:{x:100,y:-35};stUI();render();if(STAMP.img)saveStamp()};
+$("jenis").addEventListener("input",stUI);
 /* ---------- Tanggal selesai acara ---------- */
 var _ap=apiPost;
 apiPost=function(pl){if(pl&&pl.action==="saveTransaction"&&pl.data)pl.data.tglselesai=$("tglselesai").value||"";return _ap.apply(this,arguments)};
@@ -643,6 +720,7 @@ render=function(){
   _rd.apply(this,arguments);
   var a=$("tglacara").value,b=$("tglselesai").value;
   if(a&&b&&b>a){var k=" pada "+fmtDate(a),h=$("paper").innerHTML;if(h.indexOf(k)>-1)$("paper").innerHTML=h.replace(k,k+" s.d. "+fmtDate(b))}
+  applyStamp();
 };
 $("tglacara").addEventListener("input",function(){var a=$("tglacara").value,b=$("tglselesai").value;$("tglselesai").min=a;if(a&&(!b||b<a))$("tglselesai").value=a;render()});
 $("tglselesai").addEventListener("input",render);
