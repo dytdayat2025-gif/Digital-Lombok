@@ -38,7 +38,7 @@ button.pri{background:var(--acc);color:var(--accink);border-color:var(--acc);fon
 .tot div{display:flex;justify-content:space-between;padding:4px 0}
 .tot .g{font-weight:800;font-size:16px;border-top:2px solid #14213d;margin-top:4px;padding-top:8px}
 .terms{white-space:pre-line;font-size:12px;margin-top:16px;line-height:1.6}
-.h{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}.h a{color:var(--acc);font-weight:700}
+.h{display:flex;justify-content:space-between;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}.h a{color:var(--acc);font-weight:700}.h .del{color:#b42318;border-color:#f3c5c2;padding:6px 8px;font-size:11px}
 .sm{width:100%;border-collapse:collapse;font-size:11px}.sm td,.sm th{padding:4px 2px;text-align:right;border-bottom:1px solid var(--line)}.sm td:first-child,.sm th:first-child{text-align:left}
 .m{display:grid;grid-template-columns:1fr 100px 30px;gap:6px;margin-bottom:6px}.m input{padding:6px}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .lgh{filter:invert(1)}}
@@ -299,9 +299,9 @@ function drawSum(){
 }
 function drawHist(){
   drawSum();
-  $("hist").innerHTML=HIST.slice(0,30).map(function(x,i){
+  $("hist").innerHTML=HIST.map(function(x,i){
     return '<div class="h"><span>'+esc(x.no||"")+' - '+esc(x.klien||"-")+'<br>'+esc(x.acara||"")+
-    '</span><span style="text-align:right">'+rp(Number(x.total)||0)+'<br><a href="#" data-o="'+i+'">Buka</a></span></div>';
+    '</span><span style="text-align:right">'+rp(Number(x.total)||0)+'<br><a href="#" data-o="'+i+'">Buka</a> <button type="button" class="del" data-delete="'+esc(x.id||"")+'">Hapus</button></span></div>';
   }).join("")||'<p class="sub">Belum ada transaksi tersimpan.</p>';
   document.querySelectorAll("#hist a").forEach(function(a){
     a.onclick=function(e){
@@ -317,6 +317,42 @@ function drawHist(){
       draw();
     };
   });
+  document.querySelectorAll("#hist button[data-delete]").forEach(function(b){
+    b.onclick=function(){deleteTx(b.dataset.delete,b);};
+  });
+}
+function deleteTx(id,button){
+  var x=HIST.find(function(t){return String(t.id)===String(id);});
+  if(!x || !id){
+    $("dbmsg").textContent="Transaksi tidak valid. Muat ulang riwayat lalu coba lagi.";
+    $("dbmsg").style.color="#b00020";
+    return;
+  }
+  if(!window.confirm('Hapus transaksi "'+(x.no||"tanpa nomor")+'" - '+(x.klien||"tanpa nama klien")+'? Tindakan ini tidak dapat dibatalkan.'))return;
+  button.disabled=true;
+  $("dbmsg").textContent="Menghapus transaksi dari Google Sheets...";
+  $("dbmsg").style.color="";
+  apiPost({action:"deleteTransaction",data:{id:id}}).then(function(){
+    return apiGet("bootstrap");
+  }).then(function(r){
+    applyCloudData(r);
+    if(HIST.some(function(t){return String(t.id)===String(id);}))throw new Error("Transaksi masih tercatat di Google Sheets.");
+    $("dbmsg").textContent="Transaksi berhasil dihapus dari Google Sheets.";
+    $("dbmsg").style.color="green";
+  }).catch(function(e){
+    button.disabled=false;
+    $("dbmsg").textContent="Gagal menghapus transaksi: "+e.message;
+    $("dbmsg").style.color="#b00020";
+  });
+}
+function applyCloudData(r){
+  if(!r || !r.ok)throw new Error((r&&r.message)||"Gagal membaca Google Sheets.");
+  if(Array.isArray(r.master) && r.master.length){
+    MASTER=r.master.map(function(o){return [o.id,o.n,o.p,o.u]});
+    fillPick(); drawM();
+  }
+  HIST=Array.isArray(r.transactions)?r.transactions:[];
+  drawHist();
 }
 function loadCloudData(){
   if(!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.indexOf("PASTE_")===0){
@@ -324,13 +360,7 @@ function loadCloudData(){
     return;
   }
   apiGet("bootstrap").then(function(r){
-    if(!r || !r.ok) throw new Error((r&&r.message)||"Gagal membaca Google Sheets.");
-    if(Array.isArray(r.master) && r.master.length){
-      MASTER=r.master.map(function(o){return [o.id,o.n,o.p,o.u]});
-      fillPick(); drawM();
-    }
-    HIST=Array.isArray(r.transactions)?r.transactions:[];
-    drawHist();
+    applyCloudData(r);
     $("dbmsg").textContent="Terhubung ke Google Sheets.";
     $("dbmsg").style.color="green";
   }).catch(function(e){

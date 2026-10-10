@@ -4,6 +4,7 @@
  *   GET  ?action=bootstrap  -> master, transactions  (JSONP lewat &callback=)
  *   POST action=saveMaster      data: [{id,n,p,u,k,s}]  (k = jenis peralatan, s = stok; satu data dengan master barang)
  *   POST action=saveTransaction data: {...transaksi lengkap...}
+ *   POST action=deleteTransaction data: {id}
  *
  * Sheet yang dipakai: Master, TRANSAKSI_APP, Rekap (+ LOG_ERROR bila ada galat). Sheet lama (TRANSAKSI, DETAIL_ITEM, MASTER_HARGA) tidak disentuh.
  */
@@ -63,6 +64,7 @@ function doPost(e) {
     if (payload.action === "saveMaster") res = saveMaster_(payload.data);
     else if (payload.action === "saveStamp") res = saveStamp_(payload.data);
     else if (payload.action === "saveTransaction") res = saveTransaction_(payload.data);
+    else if (payload.action === "deleteTransaction") res = deleteTransaction_(payload.data && payload.data.id);
     else res = { ok: false, message: "Aksi tidak dikenal: " + payload.action };
   } catch (err) {
     logErr_("doPost", err, e && e.parameter && e.parameter.payload);
@@ -253,6 +255,37 @@ function saveTransaction_(d) {
 
   try { rebuildRekap_(); } catch (e) {} // perbarui sheet Rekap
   return { ok: true, message: "Transaksi tersimpan.", id: d.id };
+}
+
+function deleteTransaction_(id) {
+  id = String(id || "").trim();
+  if (!id) throw new Error("ID transaksi tidak valid.");
+
+  var sh = txSheet_();
+  var last = sh.getLastRow();
+  if (last < 2) throw new Error("Transaksi tidak ditemukan.");
+
+  var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  var target = 0;
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === id) {
+      target = i + 2;
+      break;
+    }
+  }
+  if (!target) throw new Error("Transaksi tidak ditemukan.");
+
+  var row = sh.getRange(target, 1, 1, H_TX.length).getValues();
+  sh.deleteRow(target);
+  try {
+    rebuildRekap_();
+  } catch (err) {
+    sh.insertRowBefore(target);
+    sh.getRange(target, 1, 1, H_TX.length).setValues(row);
+    throw new Error("Transaksi tidak dihapus karena Rekap gagal diperbarui: " + String(err && err.message ? err.message : err));
+  }
+
+  return { ok: true, message: "Transaksi berhasil dihapus.", id: id };
 }
 
 /* ============================ STEMPEL (PNG, disimpan di sheet PENGATURAN) ============================ */
