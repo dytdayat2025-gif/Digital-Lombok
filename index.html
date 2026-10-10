@@ -74,7 +74,8 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--line);padding:4px;border-radius:12px;margin-bottom:12px}
 .seg button{border:0;background:none;padding:8px;color:var(--mute)}
 .seg button.on{background:var(--panel);color:var(--ink);font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);z-index:10}
+.nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px);z-index:10}
+.nav.user-admin{grid-template-columns:repeat(6,1fr)}
 .nav button{border:0;background:none;border-radius:0;padding:8px 4px;font-size:11px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
 .nav button.on{color:var(--acc);font-weight:800}
 .nav button.logout{color:#b42318;font-weight:800}
@@ -96,7 +97,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
 <body><header class="top">
   <img class="lgh" id="lgh" alt="Digital Lombok">
   <div class="ttl"><b>Digital Lombok</b><span id="dbmsg">Database: Google Sheets</span></div>
-  <nav class="nav" id="nav"><button data-v="doc" class="on">📝<span>Dokumen</span></button><button data-v="riwayat">🕘<span>Riwayat</span></button><button data-v="barang">📦<span>Barang</span></button><button data-v="rekap">📊<span>Rekap</span></button><button data-action="logout" class="logout">⎋<span>Keluar</span></button></nav>
+  <nav class="nav" id="nav"><button data-v="doc" class="on">📝<span>Dokumen</span></button><button data-v="riwayat">🕘<span>Riwayat</span></button><button data-v="barang">📦<span>Barang</span></button><button data-v="rekap">📊<span>Rekap</span></button><button data-v="users" id="userNav" style="display:none">👤<span>Pengguna</span></button><button data-action="logout" class="logout">⎋<span>Keluar</span></button></nav>
 </header>
 <main>
 <section class="view on" id="v-doc" data-p="form">
@@ -166,6 +167,14 @@ main{max-width:1100px;margin:0 auto;padding:14px 14px 96px}
     <button id="xcsv" class="pri" style="width:100%">Unduh CSV</button>
     <p class="sub" style="margin-top:6px">Dokumen dengan klien, acara, dan tanggal acara sama dianggap satu acara (penawaran, invoice, kwitansi digabung). Piutang = total invoice dikurangi kwitansi/DP.</p>
   </div></div></section>
+<section class="view" id="v-users">
+  <div class="card"><h2>Permintaan akun pengguna</h2>
+    <p class="sub">Setujui hanya akun yang memang Anda izinkan mengakses data Digital Lombok.</p>
+    <button id="refreshUsers" type="button">Muat ulang</button>
+    <div id="userMessage" class="xmsg" role="status"></div>
+    <div id="userRequests"></div>
+  </div>
+</section>
 </main>
 <script>
 var MASTER=[["BRG-001","LED Display 3x4m",2500000,"unit"],["BRG-002","Sound System 5000W",1500000,"set"],["BRG-003","Moving Head Beam 230W",300000,"unit"],["BRG-004","Stage Rigging 6x8m",3500000,"set"],["BRG-005","Genset 60 KVA",2000000,"unit"],["BRG-006","Wireless Microphone",150000,"unit"],["BRG-007","Intercom Wireless Hollyland",1750000,"set"],["BRG-008","Smart TV 55\" Hisense + Stand",850000,"unit"]];
@@ -179,10 +188,17 @@ var rp=function(n){return "Rp "+Math.round(n).toLocaleString("id-ID")};
 var esc=function(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})};
 function fmtDate(v){if(!v)return "-";var d=new Date(v+"T00:00:00");return d.toLocaleDateString("id-ID",{day:"numeric",month:"long",year:"numeric"})}
 function logout(){
-  localStorage.removeItem("isLoggedIn");
-  window.location.href = "login.html";
+  apiPost({action:"logout"}).catch(function(){})
+    .finally(function(){
+      sessionStorage.removeItem("sessionToken");
+      sessionStorage.removeItem("sessionUser");
+      window.location.href="login.html";
+    });
 }
-if (localStorage.getItem("isLoggedIn") !== "true") {
+var AUTH_TOKEN=sessionStorage.getItem("sessionToken")||"";
+var AUTH_USER={};
+try{AUTH_USER=JSON.parse(sessionStorage.getItem("sessionUser")||"{}")}catch(e){}
+if (!AUTH_TOKEN) {
   window.location.replace("login.html");
 }
 // URL Web App Google Apps Script.
@@ -223,19 +239,13 @@ function calcBreakdown(){
 }
 function apiGet(action){
   if(!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.indexOf("PASTE_")===0) return Promise.reject(new Error("URL Google Apps Script belum diisi."));
-  return new Promise(function(resolve,reject){
-    var cb="dlJsonp_"+Date.now()+"_"+Math.floor(Math.random()*100000);
-    var script=document.createElement("script");
-    var timer=setTimeout(function(){cleanup();reject(new Error("Google Sheets tidak merespons. Cek URL Web App dan deployment Apps Script."));},15000);
-    function cleanup(){clearTimeout(timer);try{delete window[cb]}catch(e){window[cb]=undefined}if(script.parentNode)script.parentNode.removeChild(script);}
-    window[cb]=function(data){cleanup();if(data&&data.ok)resolve(data);else reject(new Error((data&&data.message)||"Gagal membaca Google Sheets."));};
-    script.onerror=function(){cleanup();reject(new Error("Tidak dapat terhubung ke Google Apps Script."));};
-    script.src=GOOGLE_SHEET_URL+"?action="+encodeURIComponent(action)+"&callback="+encodeURIComponent(cb)+"&_="+Date.now();
-    document.head.appendChild(script);
-  });
+  if(!AUTH_TOKEN)return Promise.reject(new Error("Sesi tidak tersedia. Silakan login kembali."));
+  return apiPost({action:action});
 }
 function apiPost(payload){
   if(!GOOGLE_SHEET_URL || GOOGLE_SHEET_URL.indexOf("PASTE_")===0) return Promise.reject(new Error("URL Google Apps Script belum diisi."));
+  payload.token=AUTH_TOKEN;
+  payload.requestId="req_"+Date.now()+"_"+Math.random().toString(36).slice(2);
   return new Promise(function(resolve,reject){
     var name="dlPostFrame_"+Date.now()+"_"+Math.floor(Math.random()*100000);
     var iframe=document.createElement("iframe");
@@ -246,11 +256,51 @@ function apiPost(payload){
     input.type="hidden"; input.name="payload"; input.value=JSON.stringify(payload);
     form.appendChild(input); document.body.appendChild(iframe); document.body.appendChild(form);
     var done=false;
-    var timer=setTimeout(function(){finish(false,"Waktu habis. Data mungkin belum tersimpan. Periksa deployment Apps Script.");},15000);
-    function finish(ok,msg){if(done)return;done=true;clearTimeout(timer);setTimeout(function(){if(form.parentNode)form.parentNode.removeChild(form);if(iframe.parentNode)iframe.parentNode.removeChild(iframe);},500);if(ok)resolve({ok:true,message:msg||"Data dikirim."});else reject(new Error(msg));}
-    iframe.onload=function(){finish(true,"Data berhasil dikirim ke Google Sheets.");};
+    var timer=setTimeout(function(){finish(false,"Waktu habis. Server tidak mengonfirmasi hasil permintaan.");},20000);
+    function cleanup(){window.removeEventListener("message",onMessage);setTimeout(function(){if(form.parentNode)form.parentNode.removeChild(form);if(iframe.parentNode)iframe.parentNode.removeChild(iframe);},100);}
+    function finish(ok,result){if(done)return;done=true;clearTimeout(timer);cleanup();if(ok)resolve(result);else reject(new Error(result));}
+    function onMessage(event){
+      if(event.source!==iframe.contentWindow||!event.data||event.data.requestId!==payload.requestId)return;
+      var result=event.data.result;
+      if(result&&result.ok)finish(true,result);
+      else finish(false,(result&&result.message)||"Permintaan gagal.");
+    }
+    window.addEventListener("message",onMessage);
     iframe.onerror=function(){finish(false,"Gagal mengirim data ke Google Apps Script.");};
     try{form.submit();}catch(e){finish(false,e.message||"Gagal mengirim data.");}
+  });
+}
+function loadUserRequests(){
+  var message=$("userMessage"),list=$("userRequests");
+  message.textContent="Memuat permintaan akun...";
+  apiPost({action:"listAccountRequests"}).then(function(r){
+    var requests=Array.isArray(r.requests)?r.requests:[];
+    list.innerHTML=requests.length?requests.map(function(user){
+      return '<div class="h"><span><b>'+esc(user.username)+'</b><br>'+esc(user.createdAt||"")+
+        '</span><span><button type="button" data-user-action="approve" data-username="'+esc(user.username)+'">Setujui</button> '+
+        '<button type="button" data-user-action="reject" data-username="'+esc(user.username)+'">Tolak</button></span></div>';
+    }).join(""):'<p class="sub">Tidak ada permintaan akun yang menunggu persetujuan.</p>';
+    message.textContent="";
+  }).catch(function(e){
+    message.textContent="Gagal memuat permintaan: "+e.message;
+    message.style.color="#b00020";
+  });
+}
+function configureAccountUI(){
+  if(AUTH_USER.role!=="admin")return;
+  $("nav").classList.add("user-admin");
+  $("userNav").style.display="";
+  $("refreshUsers").onclick=loadUserRequests;
+  $("userRequests").addEventListener("click",function(event){
+    var button=event.target.closest&&event.target.closest("button[data-user-action]");
+    if(!button)return;
+    var username=button.dataset.username,action=button.dataset.userAction;
+    if(action==="reject"&&!window.confirm('Tolak permintaan akun "'+username+'"?'))return;
+    button.disabled=true;
+    $("userMessage").textContent="Memproses permintaan...";
+    apiPost({action:action==="approve"?"approveAccount":"rejectAccount",data:{username:username}})
+      .then(function(r){$("userMessage").textContent=r.message;loadUserRequests()})
+      .catch(function(e){button.disabled=false;$("userMessage").textContent="Gagal memproses: "+e.message;$("userMessage").style.color="#b00020"});
   });
 }
 function saveTx(){
@@ -369,6 +419,7 @@ function loadCloudData(){
   });
 }
 function init(){
+  configureAccountUI();
   $("lgh").src=LOGO;
   var t=new Date().toISOString().slice(0,10);
   $("tgl").value=t;$("no").value="DL/QUO/"+t.slice(0,4)+"/001";$("syarat").value=SYARAT;
@@ -659,11 +710,13 @@ var _dm=drawM;
 drawM=function(){_dm.apply(this,arguments);try{drawStok()}catch(e){}};
 /* ---------- Navigasi tampilan ---------- */
 function show(v){
-  ["doc","riwayat","barang","rekap"].forEach(function(k){$("v-"+k).classList.toggle("on",k===v)});
+  if(v==="users"&&AUTH_USER.role!=="admin")return;
+  ["doc","riwayat","barang","rekap","users"].forEach(function(k){$("v-"+k).classList.toggle("on",k===v)});
   document.querySelectorAll("#nav button").forEach(function(b){b.classList.toggle("on",b.dataset.v===v)});
   window.scrollTo(0,0);
   if(v==="barang")drawStok();
   if(v==="rekap")drawRekap();
+  if(v==="users")loadUserRequests();
 }
 document.querySelectorAll("#nav button").forEach(function(b){b.onclick=function(){
   if (b.dataset.action === "logout") {

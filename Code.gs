@@ -5,6 +5,9 @@
  *   POST action=saveMaster      data: [{id,n,p,u,k,s}]  (k = jenis peralatan, s = stok; satu data dengan master barang)
  *   POST action=saveTransaction data: {...transaksi lengkap...}
  *   POST action=deleteTransaction data: {id}
+ *   POST action=requestAccount data: {username,password}
+ *   POST action=login data: {username,password}
+ *   POST action=listAccountRequests / approveAccount / rejectAccount
  *
  * Sheet yang dipakai: Master, TRANSAKSI_APP, Rekap (+ LOG_ERROR bila ada galat). Sheet lama (TRANSAKSI, DETAIL_ITEM, MASTER_HARGA) tidak disentuh.
  */
@@ -18,6 +21,9 @@ var SH_TX = "TRANSAKSI_APP"; // sengaja beda dari sheet lama "TRANSAKSI" agar da
 var SH_STOK_LAMA = "Stok"; // sheet lama, hanya dipakai untuk migrasi satu kali
 var SH_REKAP = "Rekap";
 var SH_SET = "PENGATURAN";
+var SH_USERS = "APP_USERS";
+var H_USERS = ["username", "salt", "passwordHash", "role", "status", "createdAt"];
+var SESSION_TTL_SECONDS = 21600;
 
 var H_MASTER = ["id", "n", "p", "u", "jenis", "stok"];
 var H_TX = ["id", "dibuat", "no", "tgl", "jenis", "paid", "klien", "inst", "acara", "lokasi", "tglacara",
@@ -40,39 +46,203 @@ function doGet(e) {
   var out;
   try {
     if (p.action === "bootstrap" || !p.action) {
-      var stamp = null;
-      try { stamp = readStamp_(); } catch (e2) { logErr_("readStamp", e2, ""); }
-      out = { ok: true, master: readMaster_(), transactions: readTransactions_(), stamp: stamp };
+      requireSession_(p.token);
+      out = bootstrap_();
     } else {
       out = { ok: false, message: "Aksi tidak dikenal: " + p.action };
     }
   } catch (err) {
-    logErr_("doGet", err, p.action);
+    logErr_("doGet", err, p.action || "");
     out = { ok: false, message: String(err && err.message ? err.message : err) };
   }
   return jsonp_(out, p.callback);
 }
 
 function doPost(e) {
-  var res;
-  var lock = LockService.getScriptLock();
+  var res, payload = {}, lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000);
     var raw = e && e.parameter && e.parameter.payload;
     if (!raw && e && e.postData) raw = e.postData.contents;
-    var payload = JSON.parse(raw || "{}");
-    if (payload.action === "saveMaster") res = saveMaster_(payload.data);
-    else if (payload.action === "saveStamp") res = saveStamp_(payload.data);
-    else if (payload.action === "saveTransaction") res = saveTransaction_(payload.data);
-    else if (payload.action === "deleteTransaction") res = deleteTransaction_(payload.data && payload.data.id);
-    else res = { ok: false, message: "Aksi tidak dikenal: " + payload.action };
+    payload = JSON.parse(raw || "{}");
+    if (payload.action === "login") res = login_(payload.data);
+    else if (payload.action === "requestAccount") res = requestAccount_(payload.data);
+    else {
+      var user = requireSession_(payload.token);
+      if (payload.action === "bootstrap") res = bootstrap_();
+      else if (payload.action === "saveMaster") res = saveMaster_(payload.data);
+      else if (payload.action === "saveStamp") res = saveStamp_(payload.data);
+      else if (payload.action === "saveTransaction") res = saveTransaction_(payload.data);
+      else if (payload.action === "deleteTransaction") res = deleteTransaction_(payload.data && payload.data.id);
+      else if (payload.action === "logout") res = logout_(payload.token);
+      else if (payload.action === "listAccountRequests") {
+        requireAdmin_(user);
+        res = listAccountRequests_();
+      } else if (payload.action === "approveAccount" || payload.action === "rejectAccount") {
+        requireAdmin_(user);
+        res = setAccountRequestStatus_(payload.data && payload.data.username, payload.action === "approveAccount" ? "approved" : "rejected");
+      } else res = { ok: false, message: "Aksi tidak dikenal: " + payload.action };
+    }
   } catch (err) {
-    logErr_("doPost", err, e && e.parameter && e.parameter.payload);
+    logErr_("doPost", err, payload.action || "");
     res = { ok: false, message: String(err && err.message ? err.message : err) };
   } finally {
     try { lock.releaseLock(); } catch (x) {}
   }
-  return HtmlService.createHtmlOutput("<html><body>" + JSON.stringify(res).replace(/</g, "\\u003c") + "</body></html>");
+  return postMessageResponse_(res, payload.requestId);
+}
+
+function bootstrap_() {
+  var stamp = null;
+  try { stamp = readStamp_(); } catch (stampError) { logErr_("readStamp", stampError, ""); }
+  return { ok: true, master: readMaster_(), transactions: readTransactions_(), stamp: stamp };
+}
+
+function postMessageResponse_(result, requestId) {
+  var safeId = /^[A-Za-z0-9_-]{1,100}$/.test(String(requestId || "")) ? String(requestId) : "";
+  var message = JSON.stringify({ requestId: safeId, result: result }).replace(/</g, "\\u003c");
+  return HtmlService.createHtmlOutput("<!doctype html><html><body><script>window.parent.postMessage(" + message + ", '*');</script></body></html>");
+}
+
+/** Run once after setting INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD in Script Properties. */
+function initializeAdminAccount() {
+  var props = PropertiesService.getScriptProperties();
+  var username = normalizeUsername_(props.getProperty("INITIAL_ADMIN_USERNAME"));
+  var password = props.getProperty("INITIAL_ADMIN_PASSWORD") || "";
+  if (!username || password.length < 12) throw new Error("Atur INITIAL_ADMIN_USERNAME dan INITIAL_ADMIN_PASSWORD (minimal 12 karakter) di Script Properties.");
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = accountSheet_();
+    var rows = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, H_USERS.length).getValues() : [];
+    if (rows.some(function (r) { return String(r[3]) === "admin" && String(r[4]) === "approved"; })) {
+      throw new Error("Admin aktif sudah ada; setup awal tidak dapat dijalankan ulang.");
+    }
+    var salt = Utilities.getUuid() + Utilities.getUuid();
+    var existing = findAccountRow_(username);
+    var adminRow = [username, salt, passwordHash_(password, salt), "admin", "approved", new Date().toISOString()];
+    if (existing) {
+      if (existing.values[4] === "approved") throw new Error("Username admin awal sudah dipakai akun aktif. Pilih username admin lain.");
+      existing.sheet.getRange(existing.row, 1, 1, H_USERS.length).setValues([adminRow]);
+    } else {
+      sh.appendRow(adminRow);
+    }
+    props.deleteProperty("INITIAL_ADMIN_USERNAME");
+    props.deleteProperty("INITIAL_ADMIN_PASSWORD");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function accountSheet_() {
+  return sheet_(SH_USERS, H_USERS);
+}
+
+function normalizeUsername_(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function validateAccountInput_(username, password) {
+  if (!/^[a-z0-9][a-z0-9._@+-]{2,63}$/.test(username)) throw new Error("Username harus 3–64 karakter; gunakan huruf, angka, titik, @, _, +, atau -.");
+  if (password.length < 12 || password.length > 128) throw new Error("Password harus terdiri dari 12–128 karakter.");
+}
+
+function passwordHash_(password, salt) {
+  var digest = salt + ":" + password;
+  for (var i = 0; i < 4096; i++) {
+    digest = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, digest, Utilities.Charset.UTF_8));
+  }
+  return digest;
+}
+
+function constantTimeEquals_(left, right) {
+  left = String(left || "");
+  right = String(right || "");
+  var mismatch = left.length ^ right.length;
+  for (var i = 0; i < Math.max(left.length, right.length); i++) {
+    mismatch |= (left.charCodeAt(i) || 0) ^ (right.charCodeAt(i) || 0);
+  }
+  return mismatch === 0;
+}
+
+function findAccountRow_(username) {
+  var sh = accountSheet_(), last = sh.getLastRow();
+  if (last < 2) return null;
+  var rows = sh.getRange(2, 1, last - 1, H_USERS.length).getValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).toLowerCase() === username) return { sheet: sh, row: i + 2, values: rows[i] };
+  }
+  return null;
+}
+
+function requestAccount_(data) {
+  var username = normalizeUsername_(data && data.username);
+  var password = String(data && data.password || "");
+  validateAccountInput_(username, password);
+  var sh = accountSheet_(), last = sh.getLastRow();
+  if (last > 1 && last - 1 >= 500) throw new Error("Pendaftaran sedang ditutup. Hubungi administrator.");
+  if (findAccountRow_(username)) return { ok: true, message: "Jika username tersedia, permintaan akan menunggu persetujuan admin." };
+
+  var salt = Utilities.getUuid() + Utilities.getUuid();
+  sh.appendRow([username, salt, passwordHash_(password, salt), "user", "pending", new Date().toISOString()]);
+  return { ok: true, message: "Permintaan akun terkirim. Anda dapat masuk setelah disetujui admin." };
+}
+
+function login_(data) {
+  var username = normalizeUsername_(data && data.username);
+  var password = String(data && data.password || "");
+  if (!username || !password || username.length > 64 || password.length > 128) throw new Error("Username/password salah atau akun belum disetujui.");
+  var cache = CacheService.getScriptCache(), failureKey = "loginFailures:" + username;
+  var failures = Number(cache.get(failureKey)) || 0;
+  if (failures >= 5) throw new Error("Terlalu banyak percobaan login. Coba lagi dalam 15 menit.");
+  var account = findAccountRow_(username);
+  var salt = account ? String(account.values[1]) : "invalid-account-salt";
+  var hash = passwordHash_(password, salt);
+  if (!account || account.values[4] !== "approved" ||
+      !constantTimeEquals_(hash, account ? String(account.values[2]) : "")) {
+    cache.put(failureKey, String(failures + 1), 900);
+    throw new Error("Username/password salah atau akun belum disetujui.");
+  }
+  cache.remove(failureKey);
+  var token = Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "");
+  var user = { username: username, role: String(account.values[3]) };
+  cache.put("session:" + token, JSON.stringify(user), SESSION_TTL_SECONDS);
+  return { ok: true, message: "Login berhasil.", token: token, user: user, expiresIn: SESSION_TTL_SECONDS };
+}
+
+function requireSession_(token) {
+  token = String(token || "");
+  if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Sesi tidak valid. Silakan login kembali.");
+  var cached = CacheService.getScriptCache().get("session:" + token);
+  if (!cached) throw new Error("Sesi berakhir. Silakan login kembali.");
+  return JSON.parse(cached);
+}
+
+function requireAdmin_(user) {
+  if (!user || user.role !== "admin") throw new Error("Aksi ini hanya dapat dilakukan admin.");
+}
+
+function logout_(token) {
+  CacheService.getScriptCache().remove("session:" + String(token || ""));
+  return { ok: true, message: "Logout berhasil." };
+}
+
+function listAccountRequests_() {
+  var sh = accountSheet_(), last = sh.getLastRow();
+  var requests = last < 2 ? [] : sh.getRange(2, 1, last - 1, H_USERS.length).getValues()
+    .filter(function (r) { return r[4] === "pending"; })
+    .map(function (r) { return { username: String(r[0]), createdAt: String(r[5]) }; });
+  return { ok: true, requests: requests };
+}
+
+function setAccountRequestStatus_(username, status) {
+  username = normalizeUsername_(username);
+  if (!username || (status !== "approved" && status !== "rejected")) throw new Error("Permintaan akun tidak valid.");
+  var account = findAccountRow_(username);
+  if (!account || account.values[4] !== "pending") throw new Error("Permintaan akun tidak ditemukan atau sudah diproses.");
+  account.sheet.getRange(account.row, 5).setValue(status);
+  return { ok: true, message: status === "approved" ? "Akun disetujui." : "Permintaan akun ditolak." };
 }
 
 function jsonp_(obj, cb) {

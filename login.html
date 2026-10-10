@@ -98,15 +98,32 @@
         }
 
         .error-message {
-            background-color: rgba(248, 81, 73, 0.1);
-            border: 1px solid rgba(248, 81, 73, 0.4);
-            color: #f85149;
+            background-color: rgba(56, 139, 253, 0.1);
+            border: 1px solid rgba(56, 139, 253, 0.4);
+            color: #79c0ff;
             padding: 10px;
             border-radius: 6px;
             font-size: 13px;
             margin-bottom: 16px;
             display: none;
             text-align: center;
+        }
+
+        .account-link {
+            display: block;
+            margin-top: 18px;
+            color: #79c0ff;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .account-link button {
+            border: 0;
+            background: none;
+            color: inherit;
+            cursor: pointer;
+            font: inherit;
+            text-decoration: underline;
         }
 
         .footer-note {
@@ -125,9 +142,7 @@
             <p class="brand-subtitle">Sistem Generator Penawaran & Invoice</p>
         </div>
 
-        <div id="errorMessage" class="error-message">
-            Username atau password salah!
-        </div>
+        <div id="statusMessage" class="error-message" role="status" aria-live="polite"></div>
 
         <form id="loginForm">
             <div class="form-group">
@@ -143,29 +158,130 @@
             <button type="submit" class="btn-submit">Masuk Sesi</button>
         </form>
 
+        <form id="requestForm" hidden>
+            <div class="form-group">
+                <label for="newUsername">Username / Email</label>
+                <input type="text" id="newUsername" required minlength="3" maxlength="64" autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="newPassword">Password baru</label>
+                <input type="password" id="newPassword" required minlength="12" maxlength="128" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn-submit">Minta akun</button>
+        </form>
+
+        <div class="account-link"><button id="toggleRequest" type="button">Belum punya akun? Minta akun baru</button></div>
+
         <div class="footer-note">
             &copy; 2026 Digital Lombok. Event Equipment Rental & Production.
         </div>
     </div>
 
     <script>
-        if (localStorage.getItem("isLoggedIn") === "true") {
+        const GOOGLE_SHEET_URL = "https://script.google.com/macros/s/AKfycbw0ZZvZg_7_fVHY5Jr5Ouc62J5mV_ddojcvwg92cfbyuAYQai3EYd8Sx3t76BPRySoqUQ/exec";
+        const statusMessage = document.getElementById("statusMessage");
+        const loginForm = document.getElementById("loginForm");
+        const requestForm = document.getElementById("requestForm");
+        const toggleRequest = document.getElementById("toggleRequest");
+
+        if (sessionStorage.getItem("sessionToken")) {
             window.location.href = "index.html";
         }
 
-        document.getElementById('loginForm').addEventListener('submit', function(event) {
+        function postAuth(action, data) {
+            return new Promise(function(resolve, reject) {
+                const requestId = "auth_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+                const target = "auth_frame_" + requestId;
+                const iframe = document.createElement("iframe");
+                iframe.name = target;
+                iframe.hidden = true;
+                const form = document.createElement("form");
+                form.method = "POST";
+                form.action = GOOGLE_SHEET_URL;
+                form.target = target;
+                form.hidden = true;
+                const input = document.createElement("input");
+                input.type = "hidden";
+                input.name = "payload";
+                input.value = JSON.stringify({ action: action, data: data, requestId: requestId });
+                form.appendChild(input);
+                document.body.append(iframe, form);
+
+                let finished = false;
+                const timer = setTimeout(function() {
+                    finish(new Error("Server tidak merespons. Coba lagi."));
+                }, 20000);
+
+                function finish(error, result) {
+                    if (finished) return;
+                    finished = true;
+                    clearTimeout(timer);
+                    window.removeEventListener("message", onMessage);
+                    setTimeout(function() {
+                        iframe.remove();
+                        form.remove();
+                    }, 100);
+                    if (error) reject(error);
+                    else if (!result || !result.ok) reject(new Error(result && result.message || "Permintaan gagal."));
+                    else resolve(result);
+                }
+
+                function onMessage(event) {
+                    if (event.source !== iframe.contentWindow || !event.data || event.data.requestId !== requestId) return;
+                    finish(null, event.data.result);
+                }
+
+                window.addEventListener("message", onMessage);
+                form.submit();
+            });
+        }
+
+        function showMessage(text, isError) {
+            statusMessage.textContent = text;
+            statusMessage.style.display = "block";
+            statusMessage.style.color = isError ? "#f85149" : "#7ee787";
+        }
+
+        toggleRequest.addEventListener("click", function() {
+            const requesting = loginForm.hidden === false;
+            loginForm.hidden = requesting;
+            requestForm.hidden = !requesting;
+            toggleRequest.textContent = requesting ? "Sudah punya akun? Masuk" : "Belum punya akun? Minta akun baru";
+            statusMessage.style.display = "none";
+        });
+
+        loginForm.addEventListener("submit", function(event) {
             event.preventDefault();
-
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const errorElement = document.getElementById('errorMessage');
-
-            if (username === "admin" && password === "admin123") {
-                localStorage.setItem("isLoggedIn", "true");
+            const button = loginForm.querySelector("button[type=submit]");
+            button.disabled = true;
+            postAuth("login", {
+                username: document.getElementById("username").value,
+                password: document.getElementById("password").value
+            }).then(function(result) {
+                sessionStorage.setItem("sessionToken", result.token);
+                sessionStorage.setItem("sessionUser", JSON.stringify(result.user));
                 window.location.href = "index.html";
-            } else {
-                errorElement.style.display = "block";
-            }
+            }).catch(function(error) {
+                showMessage(error.message, true);
+                button.disabled = false;
+            });
+        });
+
+        requestForm.addEventListener("submit", function(event) {
+            event.preventDefault();
+            const button = requestForm.querySelector("button[type=submit]");
+            button.disabled = true;
+            postAuth("requestAccount", {
+                username: document.getElementById("newUsername").value,
+                password: document.getElementById("newPassword").value
+            }).then(function(result) {
+                showMessage(result.message, false);
+                requestForm.reset();
+            }).catch(function(error) {
+                showMessage(error.message, true);
+            }).finally(function() {
+                button.disabled = false;
+            });
         });
     </script>
 
